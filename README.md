@@ -1,16 +1,32 @@
-# untitled1
+# Aquality
 
-A new Flutter project.
+Aquality is a web and mobile application developed using Flutter and Dart that monitors water quality conditions in small scale aquaculture ponds using IoT sensors and cloud computing.
 
-## Getting Started
+## Core Features
+### Functionalities
 
-This project is a starting point for a Flutter application.
+#### Sensor Data Collection
+IoT sensors measure water parameters in real time.
 
-A few resources to get you started if this is your first Flutter project:
+#### Cloud Data Storage
+Sensor readings are stored securely in a cloud database.
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+#### Data Visualization
+Flutter app displays readings using charts and indicators.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+#### Threshold Based Alerts
+Alerts notify users when water values go beyond safe limits.
+
+#### User Authentication
+Secure login for farmers and administrators.
+
+#### Historical Analysis
+Users can review previous water quality records.
+
+## Features
+- Real time water quality monitoring  
+- Water quality status indicator  
+- Alert and notification system  
+- Historical water quality data  
+- Multi pond support  
+- User friendly dashboard  
