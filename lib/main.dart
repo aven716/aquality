@@ -9,6 +9,9 @@ import 'package:provider/provider.dart';
 import 'login_page.dart';
 import 'dart:async';
 import 'dart:math';
+import 'package:intl/intl.dart';
+
+import 'package:fl_chart/fl_chart.dart';
 
 void main() {
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -84,6 +87,10 @@ class AquaMonitorState extends ChangeNotifier {
   Timer? _timer;
   DateTime lastUpdated = DateTime.now();
 
+  List<double> turbidityHistory = [];
+  List<double> temperatureHistory = [];
+  List<double> phHistory = [];
+
   double _turbidity = 2.3, _temperature = 22.5, _ph = 7.2;
 
   SensorReading get turbidity => SensorReading(
@@ -113,7 +120,19 @@ class AquaMonitorState extends ChangeNotifier {
     _turbidity   = (_turbidity   + (_rng.nextDouble() - 0.5) * 0.4).clamp(0.5, 15.0);
     _temperature = (_temperature + (_rng.nextDouble() - 0.5) * 0.3).clamp(15.0, 32.0);
     _ph          = (_ph          + (_rng.nextDouble() - 0.5) * 0.1).clamp(5.5, 9.5);
-    _round(); lastUpdated = DateTime.now(); notifyListeners();
+
+    _round();
+
+    turbidityHistory.add(_turbidity);
+    temperatureHistory.add(_temperature);
+    phHistory.add(_ph);
+
+    if (turbidityHistory.length > 24) turbidityHistory.removeAt(0);
+    if (temperatureHistory.length > 24) temperatureHistory.removeAt(0);
+    if (phHistory.length > 24) phHistory.removeAt(0);
+
+    lastUpdated = DateTime.now();
+    notifyListeners();
   }
 
   void refresh() {
@@ -487,33 +506,610 @@ class InfoCard extends StatelessWidget {
 // Analytics Page
 // ─────────────────────────────────────────────
 
-class AnalyticsPage extends StatelessWidget {
+class AnalyticsPage extends StatefulWidget {
   const AnalyticsPage({super.key});
+
+  @override
+  State<AnalyticsPage> createState() => _AnalyticsPageState();
+}
+
+class _AnalyticsPageState extends State<AnalyticsPage> {
+
+  int selectedRange = 0; // 0=24h, 1=7d, 2=30d
+
+  bool autoRefresh = false;
+  Timer? refreshTimer;
+
+  /// AUTO REFRESH
+  void startAutoRefresh() {
+    refreshTimer?.cancel();
+
+    refreshTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) {
+        setState(() {});
+      },
+    );
+  }
+
+  void stopAutoRefresh() {
+    refreshTimer?.cancel();
+  }
+
+  @override
+  void dispose() {
+    refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  double avg(List<double> list) =>
+      list.isEmpty ? 0 : list.reduce((a, b) => a + b) / list.length;
+
+  double min(List<double> list) =>
+      list.isEmpty ? 0 : list.reduce((a, b) => a < b ? a : b);
+
+  double max(List<double> list) =>
+      list.isEmpty ? 0 : list.reduce((a, b) => a > b ? a : b);
+
+  List<FlSpot> spots(List<double> data) {
+    return List.generate(
+      data.length,
+      (i) => FlSpot(i.toDouble(), data[i]),
+    );
+  }
+
+  /// FILTER DATA BASED ON RANGE
+  List<double> filterData(List<double> data) {
+    if (data.isEmpty) return data;
+
+    int length;
+
+    if (selectedRange == 0) {
+      length = 24;
+    } else if (selectedRange == 1) {
+      length = 24 * 7;
+    } else {
+      length = 24 * 30;
+    }
+
+    if (data.length <= length) return data;
+
+    return data.sublist(data.length - length);
+  }
+
+  /// SMART X AXIS LABELS
+  String getXAxisLabel(int index) {
+
+    if (selectedRange == 0) {
+      final now = DateTime.now().subtract(Duration(hours: 24 - index));
+      return DateFormat('ha').format(now); // 1PM
+    }
+
+    if (selectedRange == 1) {
+      final now = DateTime.now().subtract(Duration(days: 7 - (index ~/ 24)));
+      return DateFormat('EEE').format(now); // Mon
+    }
+
+    final now = DateTime.now().subtract(Duration(days: 30 - (index ~/ 24)));
+    return DateFormat('EEE').format(now);
+  }
+
+  Widget buildChart(
+    String title,
+    List<double> rawData,
+    Color color,
+    String unit,
+  ) {
+
+    final data = filterData(rawData);
+
+    double minVal = min(data);
+    double maxVal = max(data);
+
+    double padding = (maxVal - minVal) * 0.2;
+    if (padding == 0) padding = 1;
+
+    double minY = minVal - padding;
+    double maxY = maxVal + padding;
+
+    double interval = (maxY - minY) / 4;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0E1628),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      height: 240,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
+          Text(title,
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.white)),
+
+          const SizedBox(height: 10),
+
+          Expanded(
+            child: LineChart(
+              LineChartData(
+
+                minY: minY,
+                maxY: maxY,
+
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  getDrawingHorizontalLine: (value) {
+                    return FlLine(
+                      color: Colors.white.withOpacity(0.08),
+                      strokeWidth: 1,
+                    );
+                  },
+                ),
+
+                borderData: FlBorderData(show: false),
+
+                titlesData: FlTitlesData(
+
+                  /// X AXIS
+                  bottomTitles: AxisTitles(
+                    axisNameSize: 22,
+                    axisNameWidget: const Padding(
+                      padding: EdgeInsets.only(top: 6),
+                      child: Text(
+                        "Time",
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      interval: (data.length / 6).ceilToDouble(),
+                      getTitlesWidget: (value, meta) {
+
+                        int index = value.toInt();
+
+                        if (index >= data.length) {
+                          return const SizedBox();
+                        }
+
+                        return Text(
+                          getXAxisLabel(index),
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.white.withOpacity(0.5),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+
+                  /// Y AXIS
+                  leftTitles: AxisTitles(
+                    axisNameSize: 24,
+                    axisNameWidget: Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        unit,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      interval: interval,
+                      reservedSize: 40,
+                      getTitlesWidget: (value, meta) {
+                        return Text(
+                          value.toStringAsFixed(1),
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.white.withOpacity(0.4),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+
+                  rightTitles:
+                      const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+
+                  topTitles:
+                      const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                ),
+
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: spots(data),
+                    isCurved: true,
+                    color: color,
+                    barWidth: 3,
+                    dotData: FlDotData(show: false),
+                  )
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget statsCard(String title, double avg, double min, double max,
+      String unit, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0E1628),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, color: color)),
+            const SizedBox(height: 10),
+            Text("Average: ${avg.toStringAsFixed(2)} $unit"),
+            Text("Min: ${min.toStringAsFixed(2)} $unit"),
+            Text("Max: ${max.toStringAsFixed(2)} $unit"),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget rangeSelector() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        children: [
+
+          ChoiceChip(
+            label: const Text("24H"),
+            selected: selectedRange == 0,
+            onSelected: (_) => setState(() => selectedRange = 0),
+          ),
+
+          const SizedBox(width: 10),
+
+          ChoiceChip(
+            label: const Text("7D"),
+            selected: selectedRange == 1,
+            onSelected: (_) => setState(() => selectedRange = 1),
+          ),
+
+          const SizedBox(width: 10),
+
+          ChoiceChip(
+            label: const Text("30D"),
+            selected: selectedRange == 2,
+            onSelected: (_) => setState(() => selectedRange = 2),
+          ),
+
+          const Spacer(),
+
+          /// AUTO REFRESH SWITCH
+          Row(
+            children: [
+              const Text("Auto", style: TextStyle(fontSize: 12)),
+              Switch(
+                value: autoRefresh,
+                onChanged: (value) {
+
+                  setState(() {
+                    autoRefresh = value;
+                  });
+
+                  if (value) {
+                    startAutoRefresh();
+                  } else {
+                    stopAutoRefresh();
+                  }
+                },
+              )
+            ],
+          )
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(slivers: [
-      SliverToBoxAdapter(child: Container(
-        padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 20, 20, 24),
-        child: Row(children: [
-          Container(width: 44, height: 44,
-              decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFF00D4FF), Color(0xFF0080FF)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(14)),
-              child: const Icon(Icons.water_drop, color: Colors.white, size: 22)),
-          const SizedBox(width: 12),
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Analytics', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: -0.5)),
-            Text('Historical Trends', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.45))),
-          ]),
-        ]),
-      )),
-      SliverFillRemaining(child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Container(width: 80, height: 80,
-            decoration: BoxDecoration(color: const Color(0xFF00D4FF).withOpacity(0.08), shape: BoxShape.circle, border: Border.all(color: const Color(0xFF00D4FF).withOpacity(0.15))),
-            child: const Icon(Icons.bar_chart_rounded, size: 36, color: Color(0xFF00D4FF))),
-        const SizedBox(height: 20),
-        const Text('Analytics Coming Soon', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: -0.5)),
-        const SizedBox(height: 8),
-        Text('Historical data and trends\nwill appear here.', style: TextStyle(fontSize: 14, color: Colors.white.withOpacity(0.35), height: 1.5), textAlign: TextAlign.center),
-      ]))),
-    ]);
+
+    final state = context.watch<AquaMonitorState>();
+
+    final turb = filterData(state.turbidityHistory);
+    final temp = filterData(state.temperatureHistory);
+    final ph = filterData(state.phHistory);
+
+    return CustomScrollView(
+      slivers: [
+
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+                20, MediaQuery.of(context).padding.top + 20, 20, 10),
+            child: const Text("Analytics",
+                style: TextStyle(
+                    fontSize: 24, fontWeight: FontWeight.bold)),
+          ),
+        ),
+
+        SliverToBoxAdapter(child: rangeSelector()),
+
+        const SliverToBoxAdapter(child: SizedBox(height: 10)),
+
+        SliverToBoxAdapter(
+            child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Column(
+            children: [
+
+              buildChart("Turbidity Trends", turb,
+              const Color(0xFF00D4FF), "NTU"),
+
+              buildChart("Temperature Trends", temp,
+              const Color(0xFFFF6B6B), "°C"),
+
+              buildChart("pH Level Trends", ph,
+              const Color(0xFF7ED321), "pH"),
+
+              buildCombinedChart(
+                state.turbidityHistory,
+                state.temperatureHistory,
+                state.phHistory,
+              ),
+
+              const SizedBox(height: 10),
+
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text("Statistics",
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold)),
+              ),
+
+              const SizedBox(height: 10),
+
+              Row(
+                children: [
+                  statsCard(
+                    "Turbidity",
+                    avg(turb),
+                    min(turb),
+                    max(turb),
+                    "NTU",
+                    const Color(0xFF00D4FF),
+                  ),
+                  const SizedBox(width: 10),
+                  statsCard(
+                    "Temperature",
+                    avg(temp),
+                    min(temp),
+                    max(temp),
+                    "°C",
+                    const Color(0xFFFF6B6B),
+                  ),
+                  const SizedBox(width: 10),
+                  statsCard(
+                    "pH Level",
+                    avg(ph),
+                    min(ph),
+                    max(ph),
+                    "",
+                    const Color(0xFF7ED321),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 120),
+            ],
+          ),
+        ))
+      ],
+    );
+  }
+
+  Widget buildCombinedChart(
+    List<double> turbidity,
+    List<double> temperature,
+    List<double> ph,
+  ) {
+
+    final turb = filterData(turbidity);
+    final temp = filterData(temperature);
+    final phv = filterData(ph);
+
+    int length = [
+      turb.length,
+      temp.length,
+      phv.length
+    ].reduce((a, b) => a < b ? a : b);
+
+    List<FlSpot> turbSpots =
+        List.generate(length, (i) => FlSpot(i.toDouble(), turb[i]));
+
+    List<FlSpot> tempSpots =
+        List.generate(length, (i) => FlSpot(i.toDouble(), temp[i]));
+
+    List<FlSpot> phSpots =
+        List.generate(length, (i) => FlSpot(i.toDouble(), phv[i]));
+
+    double minVal = [
+      ...turb,
+      ...temp,
+      ...phv
+    ].reduce((a, b) => a < b ? a : b);
+
+    double maxVal = [
+      ...turb,
+      ...temp,
+      ...phv
+    ].reduce((a, b) => a > b ? a : b);
+
+    double padding = (maxVal - minVal) * 0.2;
+    if (padding == 0) padding = 1;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0E1628),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      height: 280,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
+          const Text(
+            "Combined Water Quality Trends",
+            style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: Colors.white),
+          ),
+
+          const SizedBox(height: 6),
+
+          /// Legend
+          Row(
+            children: const [
+
+              Icon(Icons.circle, size: 10, color: Color(0xFF00D4FF)),
+              SizedBox(width: 4),
+              Text("NTU", style: TextStyle(fontSize: 12)),
+
+              SizedBox(width: 16),
+
+              Icon(Icons.circle, size: 10, color: Color(0xFFFF6B6B)),
+              SizedBox(width: 4),
+              Text("Temp °C", style: TextStyle(fontSize: 12)),
+
+              SizedBox(width: 16),
+
+              Icon(Icons.circle, size: 10, color: Color(0xFF7ED321)),
+              SizedBox(width: 4),
+              Text("pH", style: TextStyle(fontSize: 12)),
+            ],
+          ),
+
+          const SizedBox(height: 10),
+
+          Expanded(
+            child: LineChart(
+              LineChartData(
+
+                minY: minVal - padding,
+                maxY: maxVal + padding,
+
+                lineTouchData: LineTouchData(
+                  enabled: true,
+                  touchTooltipData: LineTouchTooltipData(
+                    tooltipBgColor: Colors.black87,
+                  ),
+                ),
+
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  getDrawingHorizontalLine: (value) {
+                    return FlLine(
+                      color: Colors.white.withOpacity(0.08),
+                      strokeWidth: 1,
+                    );
+                  },
+                ),
+
+                borderData: FlBorderData(show: false),
+
+                titlesData: FlTitlesData(
+
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      interval: (length / 6).ceilToDouble(),
+                      getTitlesWidget: (value, meta) {
+
+                        int index = value.toInt();
+                        if (index >= length) return const SizedBox();
+
+                        return Text(
+                          getXAxisLabel(index),
+                          style: const TextStyle(fontSize: 10),
+                        );
+                      },
+                    ),
+                  ),
+
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      interval: (maxVal - minVal) / 4,
+                      reservedSize: 40,
+                      getTitlesWidget: (value, meta) {
+                        return Text(
+                          value.toStringAsFixed(1),
+                          style: const TextStyle(fontSize: 10),
+                        );
+                      },
+                    ),
+                  ),
+
+                  rightTitles:
+                      const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+
+                  topTitles:
+                      const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                ),
+
+                lineBarsData: [
+
+                  LineChartBarData(
+                    spots: turbSpots,
+                    isCurved: true,
+                    color: const Color(0xFF00D4FF),
+                    barWidth: 3,
+                    dotData: FlDotData(show: false),
+                  ),
+
+                  LineChartBarData(
+                    spots: tempSpots,
+                    isCurved: true,
+                    color: const Color(0xFFFF6B6B),
+                    barWidth: 3,
+                    dotData: FlDotData(show: false),
+                  ),
+
+                  LineChartBarData(
+                    spots: phSpots,
+                    isCurved: true,
+                    color: const Color(0xFF7ED321),
+                    barWidth: 3,
+                    dotData: FlDotData(show: false),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
