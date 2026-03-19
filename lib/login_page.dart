@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'main.dart'; // imports AquaMonitorState + AquaMonitorHome
+import 'package:firebase_auth/firebase_auth.dart';
+import 'main.dart';
+import 'signup_page.dart';
 
 // ════════════════════════════════════════════
 // LOGIN PAGE
@@ -50,31 +51,45 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  // ── Auth (swap with Firebase Auth when ready) ─────────────
+  // ── Firebase Auth Login ───────────────────────────────────
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() { _isLoading = true; _errorMessage = null; });
 
-    await Future.delayed(const Duration(milliseconds: 1400));
-    if (!mounted) return;
+    try {
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
 
-    if (_emailController.text.trim() == 'admin@aquality.com' &&
-        _passwordController.text == 'password123') {
+      if (!mounted) return;
       Navigator.of(context).pushReplacement(PageRouteBuilder(
         pageBuilder: (_, __, ___) => const AquaMonitorHome(),
         transitionsBuilder: (_, anim, __, child) =>
             FadeTransition(opacity: anim, child: child),
         transitionDuration: const Duration(milliseconds: 500),
       ));
-    } else {
+    } on FirebaseAuthException catch (e) {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Invalid email or password.';
+        _errorMessage = switch (e.code) {
+          'user-not-found'     => 'No account found for this email.',
+          'wrong-password'     => 'Incorrect password.',
+          'invalid-email'      => 'Invalid email address.',
+          'invalid-credential' => 'Invalid email or password.',
+          'user-disabled'      => 'This account has been disabled.',
+          'too-many-requests'  => 'Too many attempts. Try again later.',
+          _                    => 'Login failed. Please try again.',
+        };
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'An unexpected error occurred.';
       });
     }
   }
 
-  // ─────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -82,7 +97,6 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       backgroundColor: const Color(0xFF060B18),
       resizeToAvoidBottomInset: true,
       body: Stack(children: [
-        // Animated background blobs
         AnimatedBuilder(
           animation: _blobController,
           builder: (_, __) => CustomPaint(
@@ -90,7 +104,6 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
             painter: _BlobPainter(t: _blobController.value),
           ),
         ),
-        // Content
         SafeArea(
           child: FadeTransition(
             opacity: _fadeIn,
@@ -101,16 +114,6 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                 _buildLogo(),
                 SizedBox(height: size.height * 0.06),
                 _buildCard(),
-                const SizedBox(height: 24),
-                Text(
-                  'Demo: admin@aquality.com / password123',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.white.withOpacity(0.22),
-                    letterSpacing: 0.2,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
                 const SizedBox(height: 32),
               ]),
             ),
@@ -120,7 +123,6 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     );
   }
 
-  // ── Logo ─────────────────────────────────────────────────
   Widget _buildLogo() {
     return Column(children: [
       Container(
@@ -150,7 +152,6 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     ]);
   }
 
-  // ── Card ─────────────────────────────────────────────────
   Widget _buildCard() {
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 28, 24, 28),
@@ -230,7 +231,8 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
             child: Row(children: [
               const Icon(Icons.error_outline, color: Color(0xFFFF4444), size: 16),
               const SizedBox(width: 8),
-              Text(_errorMessage!, style: const TextStyle(color: Color(0xFFFF4444), fontSize: 13)),
+              Expanded(child: Text(_errorMessage!,
+                  style: const TextStyle(color: Color(0xFFFF4444), fontSize: 13))),
             ]),
           ),
           const SizedBox(height: 8),
@@ -252,7 +254,14 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
           Text("Don't have an account? ",
               style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.38))),
           GestureDetector(
-            onTap: () {},
+            onTap: () => Navigator.of(context).push(
+              PageRouteBuilder(
+                pageBuilder: (_, __, ___) => const SignUpPage(),
+                transitionsBuilder: (_, anim, __, child) =>
+                    FadeTransition(opacity: anim, child: child),
+                transitionDuration: const Duration(milliseconds: 400),
+              ),
+            ),
             child: const Text('Sign up',
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF00D4FF))),
           ),
@@ -289,8 +298,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
               Text('Sign In', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.3)),
               SizedBox(width: 8),
               Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 18),
-            ]),
-            ),
+            ])),
           ),
         ),
       ),
@@ -309,13 +317,11 @@ class _BlobPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width, h = size.height;
-
     void blob(Offset center, double radius, Color color) {
       canvas.drawCircle(center, radius,
           Paint()..shader = RadialGradient(colors: [color, Colors.transparent])
               .createShader(Rect.fromCircle(center: center, radius: radius)));
     }
-
     blob(Offset(w * 0.15 + t * w * 0.08, h * 0.12 + t * h * 0.06), w * 0.55,
         const Color(0xFF00D4FF).withOpacity(0.18));
     blob(Offset(w * 0.88 - t * w * 0.06, h * 0.82 - t * h * 0.04), w * 0.50,

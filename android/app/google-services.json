@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "184891157747",
+    "project_id": "aquality-75b54",
+    "storage_bucket": "aquality-75b54.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:184891157747:android:bd8a5590170ae195539b86",
+        "android_client_info": {
+          "package_name": "com.example.namer_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD5Umyl_DBC__SdAYWpSNqiN5pqF6Mb514"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
