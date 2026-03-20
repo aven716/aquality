@@ -83,6 +83,7 @@ class _SignUpPageState extends State<SignUpPage> with TickerProviderStateMixin {
             'email': _emailController.text.trim(),
             'createdAt': FieldValue.serverTimestamp(),
             'uid': credential.user!.uid,
+            'role': 'Caretaker', // ← add this
           });
 
       if (!mounted) return;

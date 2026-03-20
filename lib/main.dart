@@ -13,10 +13,13 @@ import 'dart:async';
 import 'dart:math';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
+import 'profile_page.dart';
+import 'notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await NotificationService().init(); // ← add this
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -195,6 +198,13 @@ class AquaMonitorState extends ChangeNotifier {
 
     lastUpdated = DateTime.now();
     notifyListeners();
+
+    NotificationService().checkAndNotify(
+      turbidity: _turbidity,
+      temperature: _temperature,
+      ph: _ph,
+      waterLevel: _waterLevel,
+    );
   }
 
   void refresh() {
@@ -231,7 +241,9 @@ class AquaMonitorState extends ChangeNotifier {
 }
 
 // ─────────────────────────────────────────────
-// App Shell
+// REPLACE THIS SECTION IN YOUR main.dart
+// Add this import at the top of main.dart:
+//   import 'profile_page.dart';
 // ─────────────────────────────────────────────
 
 class AquaMonitorHome extends StatefulWidget {
@@ -250,7 +262,11 @@ class _AquaMonitorHomeState extends State<AquaMonitorHome> {
       extendBody: true,
       body: IndexedStack(
         index: _selectedIndex,
-        children: const [DashboardPage(), AnalyticsPage()],
+        children: const [
+          DashboardPage(),
+          AnalyticsPage(),
+          ProfilePage(), // ← new tab
+        ],
       ),
       bottomNavigationBar: _buildNavBar(),
     );
@@ -276,6 +292,12 @@ class _AquaMonitorHomeState extends State<AquaMonitorHome> {
         children: [
           _navItem(0, Icons.water_drop_outlined, Icons.water_drop, 'Dashboard'),
           _navItem(1, Icons.bar_chart_outlined, Icons.bar_chart, 'Analytics'),
+          _navItem(
+            2,
+            Icons.person_outline,
+            Icons.person_rounded,
+            'Profile',
+          ), // ← new
         ],
       ),
     );
