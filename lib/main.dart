@@ -15,6 +15,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'profile_page.dart';
 import 'notification_service.dart';
+import 'pond_manage.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -70,6 +71,75 @@ class SensorReading {
   });
 }
 
+class PondProfile {
+  final String id;
+  String name;
+  String fishType;
+  String pondSize;
+
+  final List<double> turbidityHistory;
+  final List<double> temperatureHistory;
+  final List<double> phHistory;
+  final List<double> waterLevelHistory;
+
+  double turbidity;
+  double temperature;
+  double ph;
+  double waterLevel;
+  DateTime lastUpdated;
+
+  PondProfile({
+    required this.id,
+    required this.name,
+    this.fishType = 'Unknown',
+    this.pondSize = 'Unknown',
+    required this.turbidity,
+    required this.temperature,
+    required this.ph,
+    required this.waterLevel,
+    DateTime? lastUpdated,
+    List<double>? turbidityHistory,
+    List<double>? temperatureHistory,
+    List<double>? phHistory,
+    List<double>? waterLevelHistory,
+  })  : lastUpdated = lastUpdated ?? DateTime.now(),
+        turbidityHistory = turbidityHistory ?? [],
+        temperatureHistory = temperatureHistory ?? [],
+        phHistory = phHistory ?? [],
+        waterLevelHistory = waterLevelHistory ?? [];
+
+  PondProfile copyWith({
+    String? id,
+    String? name,
+    double? turbidity,
+    double? temperature,
+    double? ph,
+    double? waterLevel,
+    DateTime? lastUpdated,
+    List<double>? turbidityHistory,
+    List<double>? temperatureHistory,
+    List<double>? phHistory,
+    List<double>? waterLevelHistory,
+  }) {
+    return PondProfile(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      turbidity: turbidity ?? this.turbidity,
+      temperature: temperature ?? this.temperature,
+      ph: ph ?? this.ph,
+      waterLevel: waterLevel ?? this.waterLevel,
+      lastUpdated: lastUpdated ?? this.lastUpdated,
+      turbidityHistory:
+          turbidityHistory ?? List<double>.from(this.turbidityHistory),
+      temperatureHistory:
+          temperatureHistory ?? List<double>.from(this.temperatureHistory),
+      phHistory: phHistory ?? List<double>.from(this.phHistory),
+      waterLevelHistory:
+          waterLevelHistory ?? List<double>.from(this.waterLevelHistory),
+    );
+  }
+}
+
 class _SensorConfig {
   final String name;
   final SensorReading reading;
@@ -106,58 +176,75 @@ class _SensorConfig {
 class AquaMonitorState extends ChangeNotifier {
   final _rng = Random();
   Timer? _timer;
-  DateTime lastUpdated = DateTime.now();
+  final List<PondProfile> _ponds = [];
+  int _selectedPondIndex = 0;
 
-  List<double> turbidityHistory = [];
-  List<double> temperatureHistory = [];
-  List<double> phHistory = [];
-  List<double> waterLevelHistory = []; // NEW
+  AquaMonitorState() {
+    _ponds.add(
+      PondProfile(
+        id: 'pond-1',
+        name: 'Main Pond',
+        turbidity: 2.3,
+        temperature: 22.5,
+        ph: 7.2,
+        waterLevel: 120.0,
+      ),
+    );
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _simulate());
+  }
 
-  double _turbidity = 2.3;
-  double _temperature = 22.5;
-  double _ph = 7.2;
-  double _waterLevel = 120.0; // NEW – starts at 120 cm
+  PondProfile get _selectedPond => _ponds[_selectedPondIndex];
+  List<PondProfile> get ponds => List.unmodifiable(_ponds);
+  int get selectedPondIndex => _selectedPondIndex;
+  PondProfile get selectedPond => _selectedPond;
+  DateTime get lastUpdated => _selectedPond.lastUpdated;
+  String get selectedPondName => _selectedPond.name;
 
   SensorReading get turbidity => SensorReading(
-    value: _turbidity,
+    value: _selectedPond.turbidity,
     unit: 'NTU',
-    status: _turbidity < 5
+    status: _selectedPond.turbidity < 5
         ? 'Optimal'
-        : _turbidity < 10
+        : _selectedPond.turbidity < 10
         ? 'Warning'
         : 'Critical',
   );
 
   SensorReading get temperature => SensorReading(
-    value: _temperature,
+    value: _selectedPond.temperature,
     unit: '°C',
-    status: _temperature >= 20 && _temperature <= 25
+    status: _selectedPond.temperature >= 20 && _selectedPond.temperature <= 25
         ? 'Optimal'
-        : _temperature >= 15 && _temperature <= 30
+        : _selectedPond.temperature >= 15 && _selectedPond.temperature <= 30
         ? 'Warning'
         : 'Critical',
   );
 
   SensorReading get ph => SensorReading(
-    value: _ph,
+    value: _selectedPond.ph,
     unit: 'pH',
-    status: _ph >= 6.5 && _ph <= 8.5
+    status: _selectedPond.ph >= 6.5 && _selectedPond.ph <= 8.5
         ? 'Optimal'
-        : _ph >= 6.0 && _ph <= 9.0
+        : _selectedPond.ph >= 6.0 && _selectedPond.ph <= 9.0
         ? 'Warning'
         : 'Critical',
   );
 
   // NEW – Optimal: 50–150 cm, Warning: 20–50 or 150–180 cm, Critical: <20 or >180 cm
   SensorReading get waterLevel => SensorReading(
-    value: _waterLevel,
+    value: _selectedPond.waterLevel,
     unit: 'cm',
-    status: _waterLevel >= 50 && _waterLevel <= 150
+    status: _selectedPond.waterLevel >= 50 && _selectedPond.waterLevel <= 150
         ? 'Optimal'
-        : _waterLevel >= 20 && _waterLevel <= 180
+        : _selectedPond.waterLevel >= 20 && _selectedPond.waterLevel <= 180
         ? 'Warning'
         : 'Critical',
   );
+
+  List<double> get turbidityHistory => _selectedPond.turbidityHistory;
+  List<double> get temperatureHistory => _selectedPond.temperatureHistory;
+  List<double> get phHistory => _selectedPond.phHistory;
+  List<double> get waterLevelHistory => _selectedPond.waterLevelHistory;
 
   bool get allOptimal =>
       turbidity.status == 'Optimal' &&
@@ -165,72 +252,136 @@ class AquaMonitorState extends ChangeNotifier {
       ph.status == 'Optimal' &&
       waterLevel.status == 'Optimal'; // NEW
 
-  AquaMonitorState() {
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _simulate());
-  }
-
   void _simulate() {
-    _turbidity = (_turbidity + (_rng.nextDouble() - 0.5) * 0.4).clamp(
-      0.5,
-      15.0,
-    );
-    _temperature = (_temperature + (_rng.nextDouble() - 0.5) * 0.3).clamp(
-      15.0,
-      32.0,
-    );
-    _ph = (_ph + (_rng.nextDouble() - 0.5) * 0.1).clamp(5.5, 9.5);
-    _waterLevel = (_waterLevel + (_rng.nextDouble() - 0.5) * 3.0).clamp(
-      0.0,
-      200.0,
-    ); // NEW
-
-    _round();
-
-    turbidityHistory.add(_turbidity);
-    temperatureHistory.add(_temperature);
-    phHistory.add(_ph);
-    waterLevelHistory.add(_waterLevel); // NEW
-
-    if (turbidityHistory.length > 24) turbidityHistory.removeAt(0);
-    if (temperatureHistory.length > 24) temperatureHistory.removeAt(0);
-    if (phHistory.length > 24) phHistory.removeAt(0);
-    if (waterLevelHistory.length > 24) waterLevelHistory.removeAt(0); // NEW
-
-    lastUpdated = DateTime.now();
+    for (final pond in _ponds) {
+      _simulatePond(pond);
+    }
     notifyListeners();
 
     NotificationService().checkAndNotify(
-      turbidity: _turbidity,
-      temperature: _temperature,
-      ph: _ph,
-      waterLevel: _waterLevel,
+      turbidity: _selectedPond.turbidity,
+      temperature: _selectedPond.temperature,
+      ph: _selectedPond.ph,
+      waterLevel: _selectedPond.waterLevel,
     );
   }
 
   void refresh() {
-    _turbidity = (_turbidity + (_rng.nextDouble() - 0.5) * 1.2).clamp(
-      0.5,
-      15.0,
-    );
-    _temperature = (_temperature + (_rng.nextDouble() - 0.5) * 1.0).clamp(
-      15.0,
-      32.0,
-    );
-    _ph = (_ph + (_rng.nextDouble() - 0.5) * 0.4).clamp(5.5, 9.5);
-    _waterLevel = (_waterLevel + (_rng.nextDouble() - 0.5) * 8.0).clamp(
-      0.0,
-      200.0,
-    ); // NEW
-    _round();
-    lastUpdated = DateTime.now();
+    _selectedPond.turbidity = (_selectedPond.turbidity +
+            (_rng.nextDouble() - 0.5) * 1.2)
+        .clamp(0.5, 15.0);
+    _selectedPond.temperature = (_selectedPond.temperature +
+            (_rng.nextDouble() - 0.5) * 1.0)
+        .clamp(15.0, 32.0);
+    _selectedPond.ph =
+        (_selectedPond.ph + (_rng.nextDouble() - 0.5) * 0.4).clamp(5.5, 9.5);
+    _selectedPond.waterLevel = (_selectedPond.waterLevel +
+            (_rng.nextDouble() - 0.5) * 8.0)
+        .clamp(0.0, 200.0);
+    _roundPond(_selectedPond);
+    _pushHistory(_selectedPond);
+    _selectedPond.lastUpdated = DateTime.now();
     notifyListeners();
   }
 
-  void _round() {
-    _turbidity = double.parse(_turbidity.toStringAsFixed(1));
-    _temperature = double.parse(_temperature.toStringAsFixed(1));
-    _ph = double.parse(_ph.toStringAsFixed(2));
-    _waterLevel = double.parse(_waterLevel.toStringAsFixed(1)); // NEW
+  void selectPond(int index) {
+    if (index < 0 || index >= _ponds.length || index == _selectedPondIndex) {
+      return;
+    }
+    _selectedPondIndex = index;
+    notifyListeners();
+  }
+
+  void addPond(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+
+    _ponds.add(
+      PondProfile(
+        id: 'pond-${DateTime.now().millisecondsSinceEpoch}',
+        name: trimmed,
+        turbidity: (2.0 + _rng.nextDouble() * 2.0),
+        temperature: (21.0 + _rng.nextDouble() * 3.0),
+        ph: (6.8 + _rng.nextDouble() * 0.8),
+        waterLevel: (95.0 + _rng.nextDouble() * 40.0),
+      ),
+    );
+    _roundPond(_ponds.last);
+    _selectedPondIndex = _ponds.length - 1;
+    notifyListeners();
+  }
+
+  void renameSelectedPond(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    _selectedPond.name = trimmed;
+    notifyListeners();
+  }
+
+  void _simulatePond(PondProfile pond) {
+    pond.turbidity = (pond.turbidity + (_rng.nextDouble() - 0.5) * 0.4).clamp(
+      0.5,
+      15.0,
+    );
+    pond.temperature =
+        (pond.temperature + (_rng.nextDouble() - 0.5) * 0.3).clamp(15.0, 32.0);
+    pond.ph = (pond.ph + (_rng.nextDouble() - 0.5) * 0.1).clamp(5.5, 9.5);
+    pond.waterLevel =
+        (pond.waterLevel + (_rng.nextDouble() - 0.5) * 3.0).clamp(0.0, 200.0);
+    _roundPond(pond);
+    _pushHistory(pond);
+    pond.lastUpdated = DateTime.now();
+  }
+
+  void _roundPond(PondProfile pond) {
+    pond.turbidity = double.parse(pond.turbidity.toStringAsFixed(1));
+    pond.temperature = double.parse(pond.temperature.toStringAsFixed(1));
+    pond.ph = double.parse(pond.ph.toStringAsFixed(2));
+    pond.waterLevel = double.parse(pond.waterLevel.toStringAsFixed(1));
+  }
+
+  void _pushHistory(PondProfile pond) {
+    pond.turbidityHistory.add(pond.turbidity);
+    pond.temperatureHistory.add(pond.temperature);
+    pond.phHistory.add(pond.ph);
+    pond.waterLevelHistory.add(pond.waterLevel);
+
+    if (pond.turbidityHistory.length > 24) pond.turbidityHistory.removeAt(0);
+    if (pond.temperatureHistory.length > 24) {
+      pond.temperatureHistory.removeAt(0);
+    }
+    if (pond.phHistory.length > 24) pond.phHistory.removeAt(0);
+    if (pond.waterLevelHistory.length > 24) {
+      pond.waterLevelHistory.removeAt(0);
+    }
+  }
+
+  void addPondFull(String name, String fishType, String size) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+
+    _ponds.add(
+      PondProfile(
+        id: 'pond-${DateTime.now().millisecondsSinceEpoch}',
+        name: trimmed,
+        fishType: fishType,
+        pondSize: size,
+        turbidity: 2 + _rng.nextDouble() * 2,
+        temperature: 22 + _rng.nextDouble() * 3,
+        ph: 7 + _rng.nextDouble(),
+        waterLevel: 100 + _rng.nextDouble() * 30,
+      ),
+    );
+
+    _selectedPondIndex = _ponds.length - 1;
+    notifyListeners();
+  }
+
+  void deletePond(int index) {
+    if (_ponds.length <= 1) return; // prevent deleting last pond
+    _ponds.removeAt(index);
+    _selectedPondIndex = 0;
+    notifyListeners();
   }
 
   @override
@@ -265,6 +416,7 @@ class _AquaMonitorHomeState extends State<AquaMonitorHome> {
         children: const [
           DashboardPage(),
           AnalyticsPage(),
+          PondManagePage(),
           ProfilePage(), // ← new tab
         ],
       ),
@@ -292,11 +444,8 @@ class _AquaMonitorHomeState extends State<AquaMonitorHome> {
         children: [
           _navItem(0, Icons.water_drop_outlined, Icons.water_drop, 'Dashboard'),
           _navItem(1, Icons.bar_chart_outlined, Icons.bar_chart, 'Analytics'),
-          _navItem(
-            2,
-            Icons.person_outline,
-            Icons.person_rounded,
-            'Profile',
+          _navItem(2, Icons.water_outlined, Icons.water, 'Pond'),
+          _navItem(3, Icons.person_outline, Icons.person_rounded, 'Profile',
           ), // ← new
         ],
       ),
@@ -514,73 +663,235 @@ class DashboardPage extends StatelessWidget {
         20,
         24,
       ),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF00D4FF), Color(0xFF0080FF)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF00D4FF).withOpacity(0.35),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: const Icon(Icons.water_drop, color: Colors.white, size: 22),
-          ),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
             children: [
-              const Text(
-                'AQuality',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF00D4FF), Color(0xFF0080FF)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF00D4FF).withOpacity(0.35),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.water_drop,
                   color: Colors.white,
-                  letterSpacing: -0.5,
+                  size: 22,
                 ),
               ),
-              Text(
-                'Water Quality Monitor',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.white.withOpacity(0.45),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'AQuality',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  Text(
+                    'Water Quality Monitor',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white.withOpacity(0.45),
+                    ),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.orange.withOpacity(0.25)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.developer_board, size: 12, color: Colors.orange),
+                    SizedBox(width: 5),
+                    Text(
+                      'Simulated',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.orange,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: Colors.orange.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.orange.withOpacity(0.25)),
+          const SizedBox(height: 18),
+          _PondSelectorCard(state: state),
+        ],
+      ),
+    );
+  }
+}
+
+class _PondSelectorCard extends StatelessWidget {
+  final AquaMonitorState state;
+  const _PondSelectorCard({required this.state});
+
+  Future<void> _showPondDialog(
+    BuildContext context, {
+    required String title,
+    required String initialValue,
+    required String actionLabel,
+    required ValueChanged<String> onSubmit,
+  }) async {
+    final controller = TextEditingController(text: initialValue);
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF0E1628),
+        title: Text(title, style: const TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Enter pond name',
+            hintStyle: TextStyle(color: Colors.white.withOpacity(0.35)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.white.withOpacity(0.10)),
             ),
-            child: const Row(
-              children: [
-                Icon(Icons.developer_board, size: 12, color: Colors.orange),
-                SizedBox(width: 5),
-                Text(
-                  'Simulated',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.orange,
-                  ),
-                ),
-              ],
+            focusedBorder: const OutlineInputBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+              borderSide: BorderSide(color: Color(0xFF00D4FF)),
             ),
           ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white.withOpacity(0.6)),
+            ),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = controller.text.trim();
+              if (value.isEmpty) return;
+              onSubmit(value);
+              Navigator.of(dialogContext).pop();
+            },
+            child: Text(actionLabel),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0E1628),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withOpacity(0.06)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00D4FF).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.filter_alt_outlined,
+                  color: Color(0xFF00D4FF),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Measured Pond',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      'Readings shown below belong to ${state.selectedPondName}',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.45),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          DropdownButtonFormField<int>(
+            value: state.selectedPondIndex,
+            dropdownColor: const Color(0xFF152039),
+            iconEnabledColor: Colors.white,
+            decoration: InputDecoration(
+              labelText: 'Current pond',
+              labelStyle: TextStyle(color: Colors.white.withOpacity(0.65)),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.03),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: Colors.white.withOpacity(0.10)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: Colors.white.withOpacity(0.10)),
+              ),
+            ),
+            items: [
+              for (var i = 0; i < state.ponds.length; i++)
+                DropdownMenuItem<int>(
+                  value: i,
+                  child: Text(
+                    state.ponds[i].name,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+            ],
+            onChanged: (value) {
+              if (value != null) state.selectPond(value);
+            },
+          ),
+          const SizedBox(height: 12),
         ],
       ),
     );

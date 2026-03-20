@@ -18,7 +18,6 @@ class AnalyticsPage extends StatefulWidget {
 }
 
 class _AnalyticsPageState extends State<AnalyticsPage> {
-
   int selectedRange = 0; // 0=24h, 1=7d, 2=30d
 
   bool autoRefresh = false;
@@ -84,12 +83,18 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   // ── Widgets ───────────────────────────────
 
   Widget buildChart(
-      String title,
-      List<double> rawData,
-      Color color,
-      String unit,
-      ) {
+    String title,
+    List<double> rawData,
+    Color color,
+    String unit,
+  ) {
     final data = filterData(rawData);
+    if (data.isEmpty) {
+      return _emptyAnalyticsCard(
+        title,
+        'No readings yet for this pond. Wait for the simulator or refresh once.',
+      );
+    }
 
     final minVal = min(data);
     final maxVal = max(data);
@@ -219,6 +224,12 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     final wlSpots   = List.generate(length, (i) => FlSpot(i.toDouble(), wlv[i])); // NEW
 
     final allValues = [...turb, ...temp, ...phv, ...wlv]; // NEW
+    if (allValues.isEmpty || length == 0) {
+      return _emptyAnalyticsCard(
+        'Combined Water Quality Trends',
+        'No readings yet for this pond. Wait for the simulator or refresh once.',
+      );
+    }
     final minVal    = allValues.reduce((a, b) => a < b ? a : b);
     final maxVal    = allValues.reduce((a, b) => a > b ? a : b);
     double padding  = (maxVal - minVal) * 0.2;
@@ -386,6 +397,36 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
+  Widget _emptyAnalyticsCard(String title, String message) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0E1628),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: TextStyle(color: Colors.white.withOpacity(0.55)),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── Build ─────────────────────────────────
 
   @override
@@ -403,8 +444,44 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           child: Padding(
             padding: EdgeInsets.fromLTRB(
                 20, MediaQuery.of(context).padding.top + 20, 20, 10),
-            child: const Text('Analytics',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Analytics',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0E1628),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.white.withOpacity(0.06)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.water_outlined,
+                        size: 18,
+                        color: Color(0xFF00D4FF),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Showing readings for ${state.selectedPondName}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         SliverToBoxAdapter(child: rangeSelector()),
