@@ -16,6 +16,7 @@ import 'firebase_options.dart';
 import 'profile_page.dart';
 import 'notification_service.dart';
 import 'pond_manage.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -102,11 +103,11 @@ class PondProfile {
     List<double>? temperatureHistory,
     List<double>? phHistory,
     List<double>? waterLevelHistory,
-  })  : lastUpdated = lastUpdated ?? DateTime.now(),
-        turbidityHistory = turbidityHistory ?? [],
-        temperatureHistory = temperatureHistory ?? [],
-        phHistory = phHistory ?? [],
-        waterLevelHistory = waterLevelHistory ?? [];
+  }) : lastUpdated = lastUpdated ?? DateTime.now(),
+       turbidityHistory = turbidityHistory ?? [],
+       temperatureHistory = temperatureHistory ?? [],
+       phHistory = phHistory ?? [],
+       waterLevelHistory = waterLevelHistory ?? [];
 
   PondProfile copyWith({
     String? id,
@@ -175,9 +176,11 @@ class _SensorConfig {
 
 class AquaMonitorState extends ChangeNotifier {
   final _rng = Random();
-  Timer? _timer;
+  Timer? _pollTimer;
+  Timer? _simTimer;
   final List<PondProfile> _ponds = [];
   int _selectedPondIndex = 0;
+  bool _isLive = false;
 
   AquaMonitorState() {
     _ponds.add(
@@ -190,7 +193,54 @@ class AquaMonitorState extends ChangeNotifier {
         waterLevel: 120.0,
       ),
     );
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _simulate());
+    _fetchLatestReading(); // fetch immediately on start
+    _pollTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _fetchLatestReading(),
+    );
+    _startSimulation(); // simulation runs until live data arrives
+  }
+
+  bool get isLive => _isLive;
+
+  Future<void> _fetchLatestReading() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .doc('stations/station1/readings/latest')
+          .get();
+
+      if (!doc.exists || doc.data() == null) return;
+
+      final data = doc.data()!;
+      final pond = _ponds[0];
+
+      pond.temperature =
+          (data['temperature'] as num?)?.toDouble() ?? pond.temperature;
+
+      if (!_isLive) {
+        _isLive = true;
+        _simTimer?.cancel(); // stop simulation once real data arrives
+        _simTimer = null;
+      }
+
+      _pushHistory(pond);
+      pond.lastUpdated = DateTime.now();
+      notifyListeners();
+
+      NotificationService().checkAndNotify(
+        turbidity: pond.turbidity,
+        temperature: pond.temperature,
+        ph: pond.ph,
+        waterLevel: pond.waterLevel,
+      );
+    } catch (e) {
+      debugPrint('Firestore fetch error: $e');
+    }
+  }
+
+  void _startSimulation() {
+    if (_simTimer != null) return;
+    _simTimer = Timer.periodic(const Duration(seconds: 5), (_) => _simulate());
   }
 
   PondProfile get _selectedPond => _ponds[_selectedPondIndex];
@@ -230,7 +280,6 @@ class AquaMonitorState extends ChangeNotifier {
         : 'Critical',
   );
 
-  // NEW – Optimal: 50–150 cm, Warning: 20–50 or 150–180 cm, Critical: <20 or >180 cm
   SensorReading get waterLevel => SensorReading(
     value: _selectedPond.waterLevel,
     unit: 'cm',
@@ -250,14 +299,11 @@ class AquaMonitorState extends ChangeNotifier {
       turbidity.status == 'Optimal' &&
       temperature.status == 'Optimal' &&
       ph.status == 'Optimal' &&
-      waterLevel.status == 'Optimal'; // NEW
+      waterLevel.status == 'Optimal';
 
   void _simulate() {
-    for (final pond in _ponds) {
-      _simulatePond(pond);
-    }
+    for (final pond in _ponds) _simulatePond(pond);
     notifyListeners();
-
     NotificationService().checkAndNotify(
       turbidity: _selectedPond.turbidity,
       temperature: _selectedPond.temperature,
@@ -267,17 +313,27 @@ class AquaMonitorState extends ChangeNotifier {
   }
 
   void refresh() {
-    _selectedPond.turbidity = (_selectedPond.turbidity +
-            (_rng.nextDouble() - 0.5) * 1.2)
-        .clamp(0.5, 15.0);
-    _selectedPond.temperature = (_selectedPond.temperature +
-            (_rng.nextDouble() - 0.5) * 1.0)
-        .clamp(15.0, 32.0);
-    _selectedPond.ph =
-        (_selectedPond.ph + (_rng.nextDouble() - 0.5) * 0.4).clamp(5.5, 9.5);
-    _selectedPond.waterLevel = (_selectedPond.waterLevel +
-            (_rng.nextDouble() - 0.5) * 8.0)
-        .clamp(0.0, 200.0);
+    if (_isLive) {
+      _fetchLatestReading(); // force a fresh Firestore fetch
+      return;
+    }
+    _selectedPond.turbidity =
+        (_selectedPond.turbidity + (_rng.nextDouble() - 0.5) * 1.2).clamp(
+          0.5,
+          15.0,
+        );
+    _selectedPond.temperature =
+        (_selectedPond.temperature + (_rng.nextDouble() - 0.5) * 1.0).clamp(
+          15.0,
+          32.0,
+        );
+    _selectedPond.ph = (_selectedPond.ph + (_rng.nextDouble() - 0.5) * 0.4)
+        .clamp(5.5, 9.5);
+    _selectedPond.waterLevel =
+        (_selectedPond.waterLevel + (_rng.nextDouble() - 0.5) * 8.0).clamp(
+          0.0,
+          200.0,
+        );
     _roundPond(_selectedPond);
     _pushHistory(_selectedPond);
     _selectedPond.lastUpdated = DateTime.now();
@@ -285,9 +341,8 @@ class AquaMonitorState extends ChangeNotifier {
   }
 
   void selectPond(int index) {
-    if (index < 0 || index >= _ponds.length || index == _selectedPondIndex) {
+    if (index < 0 || index >= _ponds.length || index == _selectedPondIndex)
       return;
-    }
     _selectedPondIndex = index;
     notifyListeners();
   }
@@ -295,15 +350,14 @@ class AquaMonitorState extends ChangeNotifier {
   void addPond(String name) {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return;
-
     _ponds.add(
       PondProfile(
         id: 'pond-${DateTime.now().millisecondsSinceEpoch}',
         name: trimmed,
-        turbidity: (2.0 + _rng.nextDouble() * 2.0),
-        temperature: (21.0 + _rng.nextDouble() * 3.0),
-        ph: (6.8 + _rng.nextDouble() * 0.8),
-        waterLevel: (95.0 + _rng.nextDouble() * 40.0),
+        turbidity: 2.0 + _rng.nextDouble() * 2.0,
+        temperature: 21.0 + _rng.nextDouble() * 3.0,
+        ph: 6.8 + _rng.nextDouble() * 0.8,
+        waterLevel: 95.0 + _rng.nextDouble() * 40.0,
       ),
     );
     _roundPond(_ponds.last);
@@ -323,11 +377,13 @@ class AquaMonitorState extends ChangeNotifier {
       0.5,
       15.0,
     );
-    pond.temperature =
-        (pond.temperature + (_rng.nextDouble() - 0.5) * 0.3).clamp(15.0, 32.0);
+    pond.temperature = (pond.temperature + (_rng.nextDouble() - 0.5) * 0.3)
+        .clamp(15.0, 32.0);
     pond.ph = (pond.ph + (_rng.nextDouble() - 0.5) * 0.1).clamp(5.5, 9.5);
-    pond.waterLevel =
-        (pond.waterLevel + (_rng.nextDouble() - 0.5) * 3.0).clamp(0.0, 200.0);
+    pond.waterLevel = (pond.waterLevel + (_rng.nextDouble() - 0.5) * 3.0).clamp(
+      0.0,
+      200.0,
+    );
     _roundPond(pond);
     _pushHistory(pond);
     pond.lastUpdated = DateTime.now();
@@ -345,21 +401,16 @@ class AquaMonitorState extends ChangeNotifier {
     pond.temperatureHistory.add(pond.temperature);
     pond.phHistory.add(pond.ph);
     pond.waterLevelHistory.add(pond.waterLevel);
-
     if (pond.turbidityHistory.length > 24) pond.turbidityHistory.removeAt(0);
-    if (pond.temperatureHistory.length > 24) {
+    if (pond.temperatureHistory.length > 24)
       pond.temperatureHistory.removeAt(0);
-    }
     if (pond.phHistory.length > 24) pond.phHistory.removeAt(0);
-    if (pond.waterLevelHistory.length > 24) {
-      pond.waterLevelHistory.removeAt(0);
-    }
+    if (pond.waterLevelHistory.length > 24) pond.waterLevelHistory.removeAt(0);
   }
 
   void addPondFull(String name, String fishType, String size) {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return;
-
     _ponds.add(
       PondProfile(
         id: 'pond-${DateTime.now().millisecondsSinceEpoch}',
@@ -372,13 +423,12 @@ class AquaMonitorState extends ChangeNotifier {
         waterLevel: 100 + _rng.nextDouble() * 30,
       ),
     );
-
     _selectedPondIndex = _ponds.length - 1;
     notifyListeners();
   }
 
   void deletePond(int index) {
-    if (_ponds.length <= 1) return; // prevent deleting last pond
+    if (_ponds.length <= 1) return;
     _ponds.removeAt(index);
     _selectedPondIndex = 0;
     notifyListeners();
@@ -386,7 +436,8 @@ class AquaMonitorState extends ChangeNotifier {
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _pollTimer?.cancel();
+    _simTimer?.cancel();
     super.dispose();
   }
 }
@@ -445,7 +496,11 @@ class _AquaMonitorHomeState extends State<AquaMonitorHome> {
           _navItem(0, Icons.water_drop_outlined, Icons.water_drop, 'Dashboard'),
           _navItem(1, Icons.bar_chart_outlined, Icons.bar_chart, 'Analytics'),
           _navItem(2, Icons.water_outlined, Icons.water, 'Pond'),
-          _navItem(3, Icons.person_outline, Icons.person_rounded, 'Profile',
+          _navItem(
+            3,
+            Icons.person_outline,
+            Icons.person_rounded,
+            'Profile',
           ), // ← new
         ],
       ),
@@ -641,7 +696,7 @@ class DashboardPage extends StatelessWidget {
               const SizedBox(height: 16),
               Center(
                 child: Text(
-                  'Simulated data · updates every 5s · last ${_fmt(state.lastUpdated)}',
+                  '${state.isLive ? "Live data" : "Simulated"} · last ${_fmt(state.lastUpdated)}',
                   style: TextStyle(
                     fontSize: 11,
                     color: Colors.white.withOpacity(0.25),
@@ -714,29 +769,41 @@ class DashboardPage extends StatelessWidget {
                 ],
               ),
               const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.orange.withOpacity(0.25)),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.developer_board, size: 12, color: Colors.orange),
-                    SizedBox(width: 5),
-                    Text(
-                      'Simulated',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.orange,
-                      ),
+              Consumer<AquaMonitorState>(
+                builder: (_, state, __) => Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: state.isLive
+                        ? Colors.green.withOpacity(0.1)
+                        : Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: state.isLive
+                          ? Colors.green.withOpacity(0.25)
+                          : Colors.orange.withOpacity(0.25),
                     ),
-                  ],
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        state.isLive ? Icons.sensors : Icons.developer_board,
+                        size: 12,
+                        color: state.isLive ? Colors.green : Colors.orange,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        state.isLive ? 'Live' : 'Simulated',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: state.isLive ? Colors.green : Colors.orange,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -1154,7 +1221,7 @@ class ReadingCard extends StatelessWidget {
           _RangeBar(config: config),
           const SizedBox(height: 10),
           Text(
-            'Simulated · auto-updates every 5s',
+            'Auto-updates every 30s',
             style: TextStyle(
               fontSize: 11,
               color: Colors.white.withOpacity(0.28),
