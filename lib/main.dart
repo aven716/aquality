@@ -217,6 +217,8 @@ class AquaMonitorState extends ChangeNotifier {
       pond.temperature =
           (data['temperature'] as num?)?.toDouble() ?? pond.temperature;
 
+      pond.ph = (data['ph'] as num?)?.toDouble() ?? pond.ph;
+
       if (!_isLive) {
         _isLive = true;
         _simTimer?.cancel(); // stop simulation once real data arrives
